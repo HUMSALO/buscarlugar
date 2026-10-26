@@ -19,6 +19,7 @@
     --on-accent: #ffffff;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -27,43 +28,50 @@ body {
     text-transform: uppercase;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
     padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
 }
 .panel {
+    flex: none;
     background: var(--surface);
     padding: 12px;
     border-bottom: 1px solid var(--outline);
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
 }
-.metodo { display: flex; flex-direction: column; gap: 8px; }
+.metodo { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 8px; }
 .btn-buscar {
     border: 0;
     border-radius: 10px;
     background: var(--accent);
     color: var(--on-accent);
     font: inherit;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
-    letter-spacing: .02em;
-    padding: 14px 12px;
+    padding: 10px 8px;
     cursor: pointer;
     touch-action: manipulation;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
 }
+.btn-buscar small { font-size: 10px; font-weight: 600; opacity: .85; }
 .btn-buscar:active { background: var(--accent-dark); }
-.btn-buscar:focus-visible, #btnMapa:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.btn-buscar:focus-visible, .btn-sec:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
 .btn-buscar[disabled] { opacity: .7; }
 .resultado {
-    min-height: 44px;
+    min-height: 52px;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 700;
     line-height: 1.3;
-    padding: 8px 10px;
+    padding: 6px 8px;
     border-radius: 10px;
     background: var(--surface-alt);
     color: var(--texto-sec);
@@ -71,22 +79,24 @@ body {
 .resultado.ok { background: var(--accent-soft); color: var(--accent-dark); }
 .resultado.error { color: var(--error); }
 
-#btnMapa {
+.fila { display: flex; gap: 8px; }
+.btn-sec {
+    flex: 1;
     border: 1px solid var(--outline);
     border-radius: 10px;
     background: var(--surface);
     color: var(--accent-dark);
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
-    padding: 12px;
+    padding: 11px 8px;
     cursor: pointer;
     touch-action: manipulation;
 }
-#mapaCaja { flex: 1; position: relative; min-height: 0; background: #e5e7eb; display: none; }
+#mapaCaja { flex: 1 0 340px; position: relative; background: #e5e7eb; display: none; }
 #mapaCaja.abierto { display: block; }
 #mapa { position: absolute; inset: 0; }
-#precision {
+#etiqueta {
     position: absolute;
     left: 8px; bottom: 8px;
     z-index: 500;
@@ -97,17 +107,20 @@ body {
     padding: 4px 8px;
     border-radius: 6px;
     display: none;
+    pointer-events: none;
 }
-#vacio {
+#ayuda {
     position: absolute;
-    inset: 0;
-    z-index: 400;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--texto-sec);
-    font-size: 13px;
-    font-weight: 600;
+    top: 8px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 500;
+    background: rgba(255,255,255,.92);
+    color: var(--texto);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 5px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
     pointer-events: none;
 }
 @media (prefers-color-scheme: dark) {
@@ -123,7 +136,7 @@ body {
         --on-accent: #0f1115;
     }
     .btn-buscar:active { background: #8fb6ff; }
-    #precision { background: rgba(24,27,34,.92); }
+    #etiqueta, #ayuda { background: rgba(24,27,34,.92); }
     #mapaCaja { background: #1f232c; }
 }
 </style>
@@ -132,50 +145,76 @@ body {
 
 <div class="panel">
     <div class="metodo">
-        <button id="btnOverpass" class="btn-buscar" type="button">📍 BUSCAR LUGAR (OVERPASS)</button>
+        <button id="btnOverpass" class="btn-buscar" type="button">📍 OVERPASS<small>CERCANAS</small></button>
         <div id="resOverpass" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
     </div>
     <div class="metodo">
-        <button id="btnPhoton" class="btn-buscar" type="button">📍 BUSCAR LUGAR (PHOTON)</button>
+        <button id="btnPhoton" class="btn-buscar" type="button">📍 PHOTON 1<small>CALLE → AVENIDA</small></button>
         <div id="resPhoton" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
     </div>
-    <button id="btnMapa" type="button" aria-expanded="false">▼ DESPLEGAR MAPA</button>
+    <div class="metodo">
+        <button id="btnPhoton2" class="btn-buscar" type="button">📍 PHOTON 2<small>AMBOS LADOS</small></button>
+        <div id="resPhoton2" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
+    </div>
+    <div class="fila">
+        <button id="btnMapa" class="btn-sec" type="button" aria-expanded="false">▼ DESPLEGAR MAPA</button>
+        <button id="btnQuitar" class="btn-sec" type="button" hidden>✕ QUITAR PUNTO (USAR GPS)</button>
+    </div>
 </div>
 
 <div id="mapaCaja">
     <div id="mapa"></div>
-    <div id="vacio">EL MAPA APARECE AL BUSCAR</div>
-    <div id="precision"></div>
+    <div id="ayuda">TOCA EL MAPA PARA PONER UN PUNTO</div>
+    <div id="etiqueta"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-/* ===== Mapa plegable ===== */
+/* ===================== MAPA PLEGABLE + PUNTO MANUAL ===================== */
 const caja = document.getElementById("mapaCaja");
 const btnMapa = document.getElementById("btnMapa");
-const vacio = document.getElementById("vacio");
-const precisionEl = document.getElementById("precision");
+const btnQuitar = document.getElementById("btnQuitar");
+const ayuda = document.getElementById("ayuda");
+const etiqueta = document.getElementById("etiqueta");
 
 let mapa = null, capa = null;
-let punto = null;   // último punto GPS { lat, lon, prec }
+let punto = null;          // punto que se ve en el mapa { lat, lon, prec, manual }
+let manualPunto = null;    // si existe, todas las búsquedas usan este punto en vez del GPS
+const CENTRO_DEFECTO = [9.9328, -84.0795];   // San José centro, solo para abrir el mapa sin punto
 
-function dibujarMapa() {
-    if (!punto || !window.L || !caja.classList.contains("abierto")) return;
-    vacio.style.display = "none";
-    if (!mapa) {
-        mapa = L.map("mapa", { zoomControl: false, attributionControl: true });
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OSM" }).addTo(mapa);
+function asegurarMapa() {
+    if (mapa || !window.L) return;
+    mapa = L.map("mapa", { zoomControl: false, attributionControl: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OSM" }).addTo(mapa);
+    mapa.setView(CENTRO_DEFECTO, 16);
+    mapa.on("click", e => ponerPuntoManual(e.latlng.lat, e.latlng.lng));
+}
+
+function dibujarMapa(recentrar) {
+    if (!caja.classList.contains("abierto")) return;   // replegado: se dibuja al desplegar
+    asegurarMapa();
+    if (!mapa) return;
+    if (capa) { capa.remove(); capa = null; }
+    if (punto) {
+        capa = L.layerGroup().addTo(mapa);
+        if (punto.prec && punto.prec > 5) {
+            L.circle([punto.lat, punto.lon], { radius: Math.min(punto.prec, 200), color: "#1b6ef3", weight: 1, fillOpacity: 0.12 }).addTo(capa);
+        }
+        L.circleMarker([punto.lat, punto.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#e53935", fillOpacity: 1 }).addTo(capa);
+        if (recentrar) mapa.setView([punto.lat, punto.lon], 17);
+        etiqueta.textContent = punto.manual
+            ? "PUNTO MANUAL · " + punto.lat.toFixed(5) + ", " + punto.lon.toFixed(5)
+            : "GPS ±" + Math.round(punto.prec || 0) + " M";
+        etiqueta.style.display = "block";
+        ayuda.style.display = "none";
+    } else {
+        etiqueta.style.display = "none";
+        ayuda.style.display = "block";
     }
-    if (capa) capa.remove();
-    capa = L.layerGroup().addTo(mapa);
-    if (punto.prec && punto.prec > 5) {
-        L.circle([punto.lat, punto.lon], { radius: Math.min(punto.prec, 200), color: "#1b6ef3", weight: 1, fillOpacity: 0.12 }).addTo(capa);
-    }
-    L.circleMarker([punto.lat, punto.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#e53935", fillOpacity: 1 }).addTo(capa);
-    mapa.setView([punto.lat, punto.lon], 17);
-    setTimeout(() => { mapa.invalidateSize(); mapa.setView([punto.lat, punto.lon], 17); }, 120);
-    precisionEl.textContent = punto.prec ? "PRECISIÓN ±" + Math.round(punto.prec) + " M" : "";
-    precisionEl.style.display = punto.prec ? "block" : "none";
+    setTimeout(() => {
+        mapa.invalidateSize();
+        if (recentrar && punto) mapa.setView([punto.lat, punto.lon], 17);
+    }, 120);
 }
 
 btnMapa.addEventListener("click", () => {
@@ -183,21 +222,44 @@ btnMapa.addEventListener("click", () => {
     caja.classList.toggle("abierto", abrir);
     btnMapa.setAttribute("aria-expanded", abrir ? "true" : "false");
     btnMapa.textContent = abrir ? "▲ REPLEGAR MAPA" : "▼ DESPLEGAR MAPA";
-    if (abrir) { vacio.style.display = punto ? "none" : "flex"; dibujarMapa(); }
+    if (abrir) {
+        dibujarMapa(true);
+        setTimeout(() => caja.scrollIntoView({ behavior: "smooth", block: "nearest" }), 150);
+    }
 });
 
-function guardarPunto(lat, lon, prec) {
-    punto = { lat, lon, prec };
-    dibujarMapa();   // si el mapa está replegado se dibuja al desplegarlo
+function guardarPuntoGPS(lat, lon, prec) {
+    punto = { lat, lon, prec, manual: false };
+    dibujarMapa(true);
 }
 
-/* ===== Estado de cada método ===== */
+// Toque en el mapa: fija el punto de prueba y lanza las tres búsquedas sobre él
+function ponerPuntoManual(lat, lon) {
+    manualPunto = { lat, lon };
+    punto = { lat, lon, prec: 0, manual: true };
+    btnQuitar.hidden = false;
+    dibujarMapa(false);
+    buscar("overpass", buscarOverpass);
+    buscar("photon", buscarPhoton);
+    buscar("photon2", buscarPhotonLados);
+}
+
+btnQuitar.addEventListener("click", () => {
+    manualPunto = null;
+    punto = null;
+    btnQuitar.hidden = true;
+    dibujarMapa(false);
+});
+
+/* ===================== ESTADO DE CADA MÉTODO ===================== */
 const metodos = {
     overpass: { btn: document.getElementById("btnOverpass"), res: document.getElementById("resOverpass"), token: 0, fin: 0 },
-    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 }
+    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 },
+    photon2:  { btn: document.getElementById("btnPhoton2"),  res: document.getElementById("resPhoton2"),  token: 0, fin: 0 }
 };
 function mostrar(m, txt, clase) { m.res.textContent = txt; m.res.className = "resultado" + (clase ? " " + clase : ""); }
 function fallar(m, msg) { mostrar(m, msg, "error"); m.btn.disabled = false; }
+const esperar = ms => new Promise(ok => setTimeout(ok, ms));
 
 /* ===================== OVERPASS ===================== */
 const SERVIDORES = [
@@ -230,7 +292,7 @@ function buscarOverpass(lat, lon, tk) {
 
     consultarOverpass(`[out:json][timeout:8];(way(around:90,${lat},${lon})["highway"]["name"];);out geom;`).then(data => {
         const avDist = {}, caDist = {};
-        // Distancia (m) del punto GPS a cada tramo de calle (plano local lat/lon -> metros)
+        // Distancia (m) del punto a cada tramo de calle (plano local lat/lon -> metros)
         const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
         const distSegmento = (ax, ay, bx, by) => {
             const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
@@ -292,12 +354,12 @@ function buscarOverpass(lat, lon, tk) {
     }).catch(() => reintentar());
 }
 
-/* ===================== PHOTON ===================== */
-// Busca el número de la calle (o avenida) más cercana: Photon ordena por cercanía y se toma
-// el primer resultado cuyo nombre sea "CALLE n" / "AVENIDA n". Radio en km: 100 m y luego 250 m.
-async function photon(lat, lon, palabra) {
+/* ===================== PHOTON (base) ===================== */
+// Número de la calle (o avenida) más cercana: Photon ordena por cercanía y se toma el primer
+// resultado cuyo nombre sea "CALLE n" / "AVENIDA n". Radios en km (por defecto 100 m y 250 m).
+async function photon(lat, lon, palabra, radios) {
     const re = new RegExp(palabra + "\\s*(\\d+)", "i");
-    for (const radio of [0.1, 0.25]) {
+    for (const radio of (radios || [0.1, 0.25])) {
         const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radio}&limit=20&osm_tag=highway`;
         const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -306,14 +368,34 @@ async function photon(lat, lon, palabra) {
             const p = f.properties || {};
             for (const nombre of [p.name, p.street]) {
                 const mt = nombre && String(nombre).match(re);
-                if (mt) return mt[1];
+                if (mt) return Number(mt[1]);
             }
         }
     }
     return null;
 }
 
-// Primero la calle, después la avenida
+// La calle o avenida más cercana al punto, sea cual sea: { tipo: "calle" | "avenida", num }
+async function photonPrimero(lat, lon) {
+    for (const radio of [0.1, 0.25]) {
+        const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radio}&limit=20&osm_tag=highway`;
+        const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        for (const f of (d.features || [])) {
+            const p = f.properties || {};
+            for (const nombre of [p.name, p.street]) {
+                const mt = nombre && String(nombre).match(/(calle|avenida)\s*(\d+)/i);
+                if (mt) return { tipo: mt[1].toLowerCase(), num: Number(mt[2]) };
+            }
+        }
+    }
+    return null;
+}
+
+const unicosOrdenados = (lista) => Array.from(new Set(lista.filter(n => n !== null))).sort((a, b) => a - b);
+
+/* ===================== PHOTON 1: primero la calle, después la avenida ===================== */
 async function buscarPhoton(lat, lon, tk) {
     const m = metodos.photon;
     const vigente = () => tk === m.token;
@@ -327,31 +409,82 @@ async function buscarPhoton(lat, lon, tk) {
             const avenida = await photon(lat, lon, "avenida");
             if (!vigente()) return;
 
-            const txt = [avenida && "AVENIDA " + avenida, calle && "CALLE " + calle].filter(Boolean).join(" ");
+            const txt = [avenida !== null && "AVENIDA " + avenida, calle !== null && "CALLE " + calle].filter(Boolean).join(" ");
             if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; return; }
         } catch (e) { /* se reintenta abajo */ }
 
         if (!vigente()) return;
         if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
-        await new Promise(ok => setTimeout(ok, 500));
+        await esperar(500);
     }
 }
 
-/* ===================== GPS + BOTONES ===================== */
+/* ===================== PHOTON 2: avenidas o calles de ambos lados =====================
+   1) Busca la vía más cercana al punto.
+   2) Si es una CALLE (va de norte a sur): se queda con esa calle y busca la avenida que queda
+      al norte y la que queda al sur (sondeos a 60 m). Muestra las avenidas de menor a mayor.
+   3) Si es una AVENIDA (va de este a oeste): se queda con esa avenida y busca la calle del este
+      y la del oeste. Muestra las calles de menor a mayor. */
+async function buscarPhotonLados(lat, lon, tk) {
+    const m = metodos.photon2;
+    const vigente = () => tk === m.token;
+    const SONDEO = 60;   // metros hacia cada lado
+    const dLat = SONDEO / 111320, dLon = SONDEO / (111320 * Math.cos(lat * Math.PI / 180));
+    while (vigente()) {
+        try {
+            mostrar(m, "BUSCANDO CALLE O AVENIDA…");
+            const via = await photonPrimero(lat, lon);
+            if (!vigente()) return;
+
+            if (via) {
+                let txt = "";
+                if (via.tipo === "calle") {
+                    mostrar(m, "CALLE " + via.num + " · BUSCANDO AVENIDAS…");
+                    const lados = await Promise.all([
+                        photon(lat + dLat, lon, "avenida", [0.1]),
+                        photon(lat - dLat, lon, "avenida", [0.1])
+                    ]);
+                    const avs = unicosOrdenados(lados);
+                    txt = (avs.length ? "AVENIDA " + avs.join(" Y ") + " " : "") + "CALLE " + via.num;
+                } else {
+                    mostrar(m, "AVENIDA " + via.num + " · BUSCANDO CALLES…");
+                    const lados = await Promise.all([
+                        photon(lat, lon + dLon, "calle", [0.1]),
+                        photon(lat, lon - dLon, "calle", [0.1])
+                    ]);
+                    const cas = unicosOrdenados(lados);
+                    txt = "AVENIDA " + via.num + (cas.length ? " CALLE " + cas.join(" Y ") : "");
+                }
+                if (!vigente()) return;
+                mostrar(m, txt, "ok");
+                m.btn.disabled = false;
+                return;
+            }
+        } catch (e) { /* se reintenta abajo */ }
+
+        if (!vigente()) return;
+        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
+        await esperar(500);
+    }
+}
+
+/* ===================== PUNTO: GPS o punto manual ===================== */
 function buscar(nombre, ejecutar) {
     const m = metodos[nombre];
-    if (!navigator.geolocation) { fallar(m, "GPS NO DISPONIBLE"); return; }
-
     const tk = ++m.token;
     m.fin = Date.now() + 12000;   // tope: si en 12 s no hay lugar, se detiene
     m.btn.disabled = true;
     mostrar(m, "BUSCANDO LUGAR…");
 
+    // Con punto manual no se usa el GPS
+    if (manualPunto) { ejecutar(manualPunto.lat, manualPunto.lon, tk); return; }
+
+    if (!navigator.geolocation) { fallar(m, "GPS NO DISPONIBLE"); return; }
     const vigente = () => tk === m.token;
     const pedir = () => navigator.geolocation.getCurrentPosition(pos => {
         if (!vigente()) return;
         const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-        guardarPunto(lat, lon, accuracy);
+        guardarPuntoGPS(lat, lon, accuracy);
         ejecutar(lat, lon, tk);
     }, err => {
         if (!vigente()) return;
@@ -363,6 +496,7 @@ function buscar(nombre, ejecutar) {
 
 metodos.overpass.btn.addEventListener("click", () => buscar("overpass", buscarOverpass));
 metodos.photon.btn.addEventListener("click",   () => buscar("photon", buscarPhoton));
+metodos.photon2.btn.addEventListener("click",  () => buscar("photon2", buscarPhotonLados));
 </script>
 </body>
 </html>
