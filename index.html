@@ -40,25 +40,18 @@ body {
     flex-direction: column;
     gap: 10px;
 }
-.metodo { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 8px; }
 .btn-buscar {
     border: 0;
     border-radius: 10px;
     background: var(--accent);
     color: var(--on-accent);
     font: inherit;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
-    padding: 10px 8px;
+    padding: 14px 12px;
     cursor: pointer;
     touch-action: manipulation;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
 }
-.btn-buscar small { font-size: 10px; font-weight: 600; opacity: .85; }
 .btn-buscar:active { background: var(--accent-dark); }
 .btn-buscar:focus-visible, .btn-sec:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
 .btn-buscar[disabled] { opacity: .7; }
@@ -68,10 +61,10 @@ body {
     align-items: center;
     justify-content: center;
     text-align: center;
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
     line-height: 1.3;
-    padding: 6px 8px;
+    padding: 8px 10px;
     border-radius: 10px;
     background: var(--surface-alt);
     color: var(--texto-sec);
@@ -144,14 +137,8 @@ body {
 <body>
 
 <div class="panel">
-    <div class="metodo">
-        <button id="btnOverpass" class="btn-buscar" type="button">📍 OVERPASS<small>CERCANAS</small></button>
-        <div id="resOverpass" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
-    </div>
-    <div class="metodo">
-        <button id="btnPhoton" class="btn-buscar" type="button">📍 PHOTON<small>CERCANAS</small></button>
-        <div id="resPhoton" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
-    </div>
+    <button id="btnBuscar" class="btn-buscar" type="button">📍 BUSCAR LUGAR</button>
+    <div id="resultado" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
     <div class="fila">
         <button id="btnMapa" class="btn-sec" type="button" aria-expanded="false">▼ DESPLEGAR MAPA</button>
         <button id="btnQuitar" class="btn-sec" type="button" hidden>✕ QUITAR PUNTO (USAR GPS)</button>
@@ -166,16 +153,72 @@ body {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+/*PURO-INICIO*/
+/* ===== Números de avenida / calle =====
+   Acepta cifras ("AVENIDA 2", "CALLE 7") y palabras ("AVENIDA SEGUNDA", "CALLE CENTRAL").
+   Un nombre sin número (por ejemplo "CALLE BLANCOS" o "PASEO COLÓN") no cuenta. */
+const ORDINALES = {
+    central: 0, cero: 0,
+    primera: 1, primero: 1, segunda: 2, segundo: 2, tercera: 3, tercero: 3,
+    cuarta: 4, cuarto: 4, quinta: 5, quinto: 5, sexta: 6, sexto: 6,
+    septima: 7, septimo: 7, octava: 8, octavo: 8, novena: 9, noveno: 9,
+    decima: 10, decimo: 10, undecima: 11, undecimo: 11, duodecima: 12, duodecimo: 12
+};
+const sinTildes = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function numeroDe(nombre, tipo) {
+    const n = sinTildes(nombre);
+    const pal = tipo === "avenida" ? "(?:avenida|av\\.?)" : "calle";
+    const cifra = n.match(new RegExp("\\b" + pal + "\\s*(\\d+)\\b"));
+    if (cifra) return Number(cifra[1]);
+    const palabra = n.match(new RegExp("\\b" + pal + "\\s+([a-z]+)\\b"));
+    if (palabra && Object.prototype.hasOwnProperty.call(ORDINALES, palabra[1])) return ORDINALES[palabra[1]];
+    return null;
+}
+
+/* ===== Elige la avenida y la calle donde está el punto =====
+   Photon da un solo punto por cada vía, y ese punto puede quedar lejos a lo largo de la calle.
+   Por eso no se mide la distancia directa: las avenidas van de este a oeste, así que su distancia
+   al punto es la diferencia de LATITUD; las calles van de norte a sur, así que su distancia es la
+   diferencia de LONGITUD. Se elige la de menor distancia, hasta MAX_DIST metros. */
+const MAX_DIST = 500;
+function elegir(pool, lat, lon) {
+    const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
+    const av = {}, ca = {};
+    pool.forEach(e => {
+        const na = numeroDe(e.nombre, "avenida");
+        if (na !== null) { const d = Math.abs(e.lat - lat) * kLat; if (!(na in av) || d < av[na]) av[na] = d; }
+        const nc = numeroDe(e.nombre, "calle");
+        if (nc !== null) { const d = Math.abs(e.lon - lon) * kLon; if (!(nc in ca) || d < ca[nc]) ca[nc] = d; }
+    });
+    const mejor = obj => {
+        let k = null;
+        Object.keys(obj).forEach(n => { if (obj[n] <= MAX_DIST && (k === null || obj[n] < obj[k])) k = n; });
+        return k === null ? null : Number(k);
+    };
+    return { avenida: mejor(av), calle: mejor(ca) };
+}
+
+function textoLugar(r) {
+    if (r.avenida !== null && r.calle !== null) return `AVENIDA ${r.avenida} CALLE ${r.calle}`;
+    if (r.avenida !== null) return `AVENIDA ${r.avenida}`;
+    if (r.calle !== null) return `CALLE ${r.calle}`;
+    return "";
+}
+/*PURO-FIN*/
+
 /* ===================== MAPA PLEGABLE + PUNTO MANUAL ===================== */
 const caja = document.getElementById("mapaCaja");
 const btnMapa = document.getElementById("btnMapa");
 const btnQuitar = document.getElementById("btnQuitar");
+const btnBuscar = document.getElementById("btnBuscar");
+const resultado = document.getElementById("resultado");
 const ayuda = document.getElementById("ayuda");
 const etiqueta = document.getElementById("etiqueta");
 
 let mapa = null, capa = null;
 let punto = null;          // punto que se ve en el mapa { lat, lon, prec, manual }
-let manualPunto = null;    // si existe, todas las búsquedas usan este punto en vez del GPS
+let manualPunto = null;    // si existe, la búsqueda usa este punto en vez del GPS
 const CENTRO_DEFECTO = [9.9328, -84.0795];   // San José centro, solo para abrir el mapa sin punto
 
 function asegurarMapa() {
@@ -224,19 +267,13 @@ btnMapa.addEventListener("click", () => {
     }
 });
 
-function guardarPuntoGPS(lat, lon, prec) {
-    punto = { lat, lon, prec, manual: false };
-    dibujarMapa(true);
-}
-
-// Toque en el mapa: fija el punto de prueba y lanza las dos búsquedas sobre él
+// Toque en el mapa: fija el punto de prueba y busca automáticamente
 function ponerPuntoManual(lat, lon) {
     manualPunto = { lat, lon };
     punto = { lat, lon, prec: 0, manual: true };
     btnQuitar.hidden = false;
     dibujarMapa(false);
-    buscar("overpass", buscarOverpass);
-    buscar("photon", buscarPhoton);
+    buscar();
 }
 
 btnQuitar.addEventListener("click", () => {
@@ -246,196 +283,107 @@ btnQuitar.addEventListener("click", () => {
     dibujarMapa(false);
 });
 
-/* ===================== ESTADO DE CADA MÉTODO ===================== */
-const metodos = {
-    overpass: { btn: document.getElementById("btnOverpass"), res: document.getElementById("resOverpass"), token: 0, fin: 0 },
-    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 }
-};
-function mostrar(m, txt, clase) { m.res.textContent = txt; m.res.className = "resultado" + (clase ? " " + clase : ""); }
-function fallar(m, msg) { mostrar(m, msg, "error"); m.btn.disabled = false; }
+/* ===================== PHOTON ===================== */
+let token = 0, fin = 0;
 const esperar = ms => new Promise(ok => setTimeout(ok, ms));
+function mostrar(txt, clase) { resultado.textContent = txt; resultado.className = "resultado" + (clase ? " " + clase : ""); }
+function fallar(msg) { mostrar(msg, "error"); btnBuscar.disabled = false; }
 
-/* ===================== TEXTO FINAL (misma regla para Overpass y Photon) =====================
-   avDist / caDist: { número: distancia mínima en metros }. Se muestran las más cercanas,
-   de menor a mayor; si hay una avenida y una calle, se deja así: AVENIDA 2 CALLE 1. */
-function componerTexto(avDist, caDist) {
-    const masCercanas = (obj, n) => Object.keys(obj).sort((a, b) => obj[a] - obj[b]).slice(0, n).sort((a, b) => a - b);
-    const avenidas = masCercanas(avDist, 2), calles = masCercanas(caDist, 2);
-    const avUna = masCercanas(avDist, 1)[0], caUna = masCercanas(caDist, 1)[0];
-    const totAv = Object.keys(avDist).length, totCa = Object.keys(caDist).length;
-    if (totAv >= 2 && totCa >= 1) return `AVENIDA ${avenidas[0]} Y ${avenidas[1]} CALLE ${caUna}`;
-    if (totCa >= 2 && totAv >= 1) return `AVENIDA ${avUna} CALLE ${calles[0]} Y ${calles[1]}`;
-    if (totAv >= 1 && totCa >= 1) return `AVENIDA ${avUna} CALLE ${caUna}`;
-    if (totAv >= 1) return `AVENIDA ${avUna}`;
-    if (totCa >= 1) return `CALLE ${caUna}`;
-    return "";
-}
-
-/* ===================== OVERPASS =====================
-const SERVIDORES = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter"
-];
-// Consulta los tres servidores a la vez y usa el que responda primero
-function consultarOverpass(consulta) {
-    const ctrls = [];
-    const pedir = (url) => {
-        const c = new AbortController();
-        ctrls.push(c);
-        const t = setTimeout(() => c.abort(), 3500);
-        return fetch(url + "?data=" + encodeURIComponent(consulta), { signal: c.signal })
-            .then(r => { clearTimeout(t); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-            .catch(e => { clearTimeout(t); throw e; });
-    };
-    return Promise.any(SERVIDORES.map(pedir)).then(d => { ctrls.forEach(c => c.abort()); return d; });
-}
-
-function buscarOverpass(lat, lon, tk) {
-    const m = metodos.overpass;
-    const vigente = () => tk === m.token;
-    const reintentar = () => {
-        if (!vigente()) return;
-        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
-        setTimeout(() => buscarOverpass(lat, lon, tk), 500);
-    };
-
-    consultarOverpass(`[out:json][timeout:8];(way(around:90,${lat},${lon})["highway"]["name"];);out geom;`).then(data => {
-        const avDist = {}, caDist = {};
-        // Distancia (m) del punto a cada tramo de calle (plano local lat/lon -> metros)
-        const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
-        const distSegmento = (ax, ay, bx, by) => {
-            const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
-            const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
-            return Math.hypot(ax + t * dx, ay + t * dy);
-        };
-        const distCalle = (geom) => {
-            if (!Array.isArray(geom) || !geom.length) return 1e9;
-            const pts = geom.filter(g => g && typeof g.lat === "number" && typeof g.lon === "number")
-                            .map(g => ({ x: (g.lon - lon) * kLon, y: (g.lat - lat) * kLat }));
-            if (!pts.length) return 1e9;
-            if (pts.length === 1) return Math.hypot(pts[0].x, pts[0].y);
-            let min = 1e9;
-            for (let i = 0; i < pts.length - 1; i++) min = Math.min(min, distSegmento(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y));
-            return min;
-        };
-        // soloFaltantes: en la búsqueda ampliada solo se completa el tipo (avenida o calle) que no apareció
-        const procesar = (elementos, soloFaltantes) => {
-            const faltaAv = !Object.keys(avDist).length, faltaCa = !Object.keys(caDist).length;
-            (elementos || []).forEach(v => {
-                const nombre = (v.tags && v.tags.name) || "";
-                if (!nombre) return;
-                const d = distCalle(v.geometry);
-                const av = nombre.match(/avenida\s*(\d+)/i);
-                if (av && (!soloFaltantes || faltaAv) && !(av[1] in avDist && avDist[av[1]] <= d)) avDist[av[1]] = d;
-                const ca = nombre.match(/calle\s*(\d+)/i);
-                if (ca && (!soloFaltantes || faltaCa) && !(ca[1] in caDist && caDist[ca[1]] <= d)) caDist[ca[1]] = d;
-            });
-        };
-        procesar(data.elements, false);
-
-        const terminar = () => {
-            if (!vigente()) return;
-            const txt = componerTexto(avDist, caDist);
-
-            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; }
-            else reintentar();
-        };
-
-        // Siempre avenida Y calle: si en 90 m falta alguna, se amplía a 150 m solo para completarla
-        if (!Object.keys(avDist).length || !Object.keys(caDist).length) {
-            consultarOverpass(`[out:json][timeout:8];(way(around:150,${lat},${lon})["highway"]["name"];);out geom;`)
-                .then(d2 => procesar(d2.elements, true))
-                .catch(() => {})
-                .then(terminar);
-        } else {
-            terminar();
-        }
-    }).catch(() => reintentar());
-}
-
-/* ===================== PHOTON: avenida y calle más cercanas =====================
-   Igual que Overpass pero con Photon: busca a 70 m y, si falta la avenida o la calle,
-   amplía a 140 m solo para completar la que no apareció. Las distancias salen de las
-   coordenadas que devuelve Photon para cada vía. */
-async function photonElementos(lat, lon, radioKm) {
+// Una consulta a Photon: devuelve las vías cercanas con su nombre y coordenadas.
+// Vías: su nombre. Otros objetos (casas, comercios): la calle de su dirección.
+async function photonVias(lat, lon, radioKm) {
     const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radioKm}&limit=50&osm_tag=highway`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
-    const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
-    return (d.features || []).map(f => {
+    const lista = [];
+    (d.features || []).forEach(f => {
         const p = f.properties || {};
         const c = (f.geometry && f.geometry.coordinates) || [];
-        const dist = c.length >= 2 ? Math.hypot((c[0] - lon) * kLon, (c[1] - lat) * kLat) : 1e9;
-        // vías: su nombre; otros objetos: la calle de su dirección
+        if (c.length < 2) return;
         const nombre = p.osm_key === "highway" ? p.name : p.street;
-        return { nombre: nombre || "", d: dist };
+        if (nombre) lista.push({ nombre: String(nombre), lat: c[1], lon: c[0] });
     });
+    return lista;
+}
+
+/* Búsqueda amplia en fases. En cada fase se consulta el punto y, si falta la avenida o la calle,
+   también puntos desplazados en ambas direcciones: al norte y al sur (para las avenidas) y al este
+   y al oeste (para las calles). Se detiene en cuanto aparecen las dos con número. */
+const FASES = [
+    { centro: 0.2, lado: 0,   radioLado: 0 },
+    { centro: 0.5, lado: 400, radioLado: 0.3 },
+    { centro: 1.0, lado: 800, radioLado: 0.5 }
+];
+
+async function buscarEnFases(lat, lon, tk) {
+    const mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos(lat * Math.PI / 180));
+    const pool = [];
+    let respuestas = 0, r = { avenida: null, calle: null };
+
+    for (const f of FASES) {
+        if (tk !== token) return null;
+        const consultas = [photonVias(lat, lon, f.centro)];
+        if (f.lado) {
+            const aLat = lat + f.lado * mLat, bLat = lat - f.lado * mLat;
+            const aLon = lon + f.lado * mLon, bLon = lon - f.lado * mLon;
+            if (r.avenida === null) consultas.push(photonVias(aLat, lon, f.radioLado), photonVias(bLat, lon, f.radioLado));
+            if (r.calle === null)   consultas.push(photonVias(lat, aLon, f.radioLado), photonVias(lat, bLon, f.radioLado));
+        }
+        const res = await Promise.allSettled(consultas);
+        res.forEach(x => { if (x.status === "fulfilled") { respuestas++; pool.push(...x.value); } });
+        r = elegir(pool, lat, lon);
+        if (r.avenida !== null && r.calle !== null) break;
+        mostrar("AMPLIANDO BÚSQUEDA…");
+    }
+    return respuestas ? r : undefined;   // undefined: ninguna consulta respondió
 }
 
 async function buscarPhoton(lat, lon, tk) {
-    const m = metodos.photon;
-    const vigente = () => tk === m.token;
-    while (vigente()) {
-        try {
-            const avDist = {}, caDist = {};
-            // soloFaltantes: en la búsqueda ampliada solo se completa el tipo (avenida o calle) que no apareció
-            const procesar = (elementos, soloFaltantes) => {
-                const faltaAv = !Object.keys(avDist).length, faltaCa = !Object.keys(caDist).length;
-                elementos.forEach(e => {
-                    const av = e.nombre.match(/avenida\s*(\d+)/i);
-                    if (av && (!soloFaltantes || faltaAv) && !(av[1] in avDist && avDist[av[1]] <= e.d)) avDist[av[1]] = e.d;
-                    const ca = e.nombre.match(/calle\s*(\d+)/i);
-                    if (ca && (!soloFaltantes || faltaCa) && !(ca[1] in caDist && caDist[ca[1]] <= e.d)) caDist[ca[1]] = e.d;
-                });
-            };
-
-            procesar(await photonElementos(lat, lon, 0.07), false);
-            if (!vigente()) return;
-            if (!Object.keys(avDist).length || !Object.keys(caDist).length) {
-                procesar(await photonElementos(lat, lon, 0.14), true);
-                if (!vigente()) return;
-            }
-
-            const txt = componerTexto(avDist, caDist);
-            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; return; }
-        } catch (e) { /* se reintenta abajo */ }
-
-        if (!vigente()) return;
-        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
-        await esperar(500);
+    while (tk === token) {
+        let r;
+        try { r = await buscarEnFases(lat, lon, tk); } catch (e) { r = undefined; }
+        if (tk !== token) return;
+        if (r) {
+            const txt = textoLugar(r);
+            // Sin número (solo nombres o nada): no se muestra nombre, se deja el punto
+            if (txt) mostrar(txt, "ok");
+            else mostrar("SIN NÚMERO · SOLO EL PUNTO", "error");
+            btnBuscar.disabled = false;
+            return;
+        }
+        if (Date.now() > fin) { fallar("NO SE LOGRA UBICAR"); return; }
+        await esperar(700);
     }
 }
 
 /* ===================== PUNTO: GPS o punto manual ===================== */
-function buscar(nombre, ejecutar) {
-    const m = metodos[nombre];
-    const tk = ++m.token;
-    m.fin = Date.now() + 12000;   // tope: si en 12 s no hay lugar, se detiene
-    m.btn.disabled = true;
-    mostrar(m, "BUSCANDO LUGAR…");
+function buscar() {
+    const tk = ++token;
+    fin = Date.now() + 15000;
+    btnBuscar.disabled = true;
+    mostrar("BUSCANDO LUGAR…");
 
     // Con punto manual no se usa el GPS
-    if (manualPunto) { ejecutar(manualPunto.lat, manualPunto.lon, tk); return; }
+    if (manualPunto) { buscarPhoton(manualPunto.lat, manualPunto.lon, tk); return; }
 
-    if (!navigator.geolocation) { fallar(m, "GPS NO DISPONIBLE"); return; }
-    const vigente = () => tk === m.token;
+    if (!navigator.geolocation) { fallar("GPS NO DISPONIBLE"); return; }
+    const vigente = () => tk === token;
     const pedir = () => navigator.geolocation.getCurrentPosition(pos => {
         if (!vigente()) return;
         const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-        guardarPuntoGPS(lat, lon, accuracy);
-        ejecutar(lat, lon, tk);
+        punto = { lat, lon, prec: accuracy, manual: false };
+        dibujarMapa(true);
+        buscarPhoton(lat, lon, tk);
     }, err => {
         if (!vigente()) return;
-        if ((err && err.code === 1) || Date.now() > m.fin) fallar(m, "NO SE LOGRA UBICAR");
+        if ((err && err.code === 1) || Date.now() > fin) fallar("NO SE LOGRA UBICAR");
         else setTimeout(() => { if (vigente()) pedir(); }, 1500);
     }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 });
     pedir();
 }
 
-metodos.overpass.btn.addEventListener("click", () => buscar("overpass", buscarOverpass));
-metodos.photon.btn.addEventListener("click",   () => buscar("photon", buscarPhoton));
+btnBuscar.addEventListener("click", buscar);
 </script>
 </body>
 </html>
