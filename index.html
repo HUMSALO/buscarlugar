@@ -149,12 +149,8 @@ body {
         <div id="resOverpass" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
     </div>
     <div class="metodo">
-        <button id="btnPhoton" class="btn-buscar" type="button">📍 PHOTON 1<small>CALLE → AVENIDA</small></button>
+        <button id="btnPhoton" class="btn-buscar" type="button">📍 PHOTON<small>CERCANAS</small></button>
         <div id="resPhoton" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
-    </div>
-    <div class="metodo">
-        <button id="btnPhoton2" class="btn-buscar" type="button">📍 PHOTON 2<small>AMBOS LADOS</small></button>
-        <div id="resPhoton2" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
     </div>
     <div class="fila">
         <button id="btnMapa" class="btn-sec" type="button" aria-expanded="false">▼ DESPLEGAR MAPA</button>
@@ -233,7 +229,7 @@ function guardarPuntoGPS(lat, lon, prec) {
     dibujarMapa(true);
 }
 
-// Toque en el mapa: fija el punto de prueba y lanza las tres búsquedas sobre él
+// Toque en el mapa: fija el punto de prueba y lanza las dos búsquedas sobre él
 function ponerPuntoManual(lat, lon) {
     manualPunto = { lat, lon };
     punto = { lat, lon, prec: 0, manual: true };
@@ -241,7 +237,6 @@ function ponerPuntoManual(lat, lon) {
     dibujarMapa(false);
     buscar("overpass", buscarOverpass);
     buscar("photon", buscarPhoton);
-    buscar("photon2", buscarPhotonLados);
 }
 
 btnQuitar.addEventListener("click", () => {
@@ -254,14 +249,29 @@ btnQuitar.addEventListener("click", () => {
 /* ===================== ESTADO DE CADA MÉTODO ===================== */
 const metodos = {
     overpass: { btn: document.getElementById("btnOverpass"), res: document.getElementById("resOverpass"), token: 0, fin: 0 },
-    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 },
-    photon2:  { btn: document.getElementById("btnPhoton2"),  res: document.getElementById("resPhoton2"),  token: 0, fin: 0 }
+    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 }
 };
 function mostrar(m, txt, clase) { m.res.textContent = txt; m.res.className = "resultado" + (clase ? " " + clase : ""); }
 function fallar(m, msg) { mostrar(m, msg, "error"); m.btn.disabled = false; }
 const esperar = ms => new Promise(ok => setTimeout(ok, ms));
 
-/* ===================== OVERPASS ===================== */
+/* ===================== TEXTO FINAL (misma regla para Overpass y Photon) =====================
+   avDist / caDist: { número: distancia mínima en metros }. Se muestran las más cercanas,
+   de menor a mayor; si hay una avenida y una calle, se deja así: AVENIDA 2 CALLE 1. */
+function componerTexto(avDist, caDist) {
+    const masCercanas = (obj, n) => Object.keys(obj).sort((a, b) => obj[a] - obj[b]).slice(0, n).sort((a, b) => a - b);
+    const avenidas = masCercanas(avDist, 2), calles = masCercanas(caDist, 2);
+    const avUna = masCercanas(avDist, 1)[0], caUna = masCercanas(caDist, 1)[0];
+    const totAv = Object.keys(avDist).length, totCa = Object.keys(caDist).length;
+    if (totAv >= 2 && totCa >= 1) return `AVENIDA ${avenidas[0]} Y ${avenidas[1]} CALLE ${caUna}`;
+    if (totCa >= 2 && totAv >= 1) return `AVENIDA ${avUna} CALLE ${calles[0]} Y ${calles[1]}`;
+    if (totAv >= 1 && totCa >= 1) return `AVENIDA ${avUna} CALLE ${caUna}`;
+    if (totAv >= 1) return `AVENIDA ${avUna}`;
+    if (totCa >= 1) return `CALLE ${caUna}`;
+    return "";
+}
+
+/* ===================== OVERPASS =====================
 const SERVIDORES = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -326,17 +336,7 @@ function buscarOverpass(lat, lon, tk) {
 
         const terminar = () => {
             if (!vigente()) return;
-            const masCercanas = (obj, n) => Object.keys(obj).sort((a, b) => obj[a] - obj[b]).slice(0, n).sort((a, b) => a - b);
-            const avenidas = masCercanas(avDist, 2), calles = masCercanas(caDist, 2);
-            const avUna = masCercanas(avDist, 1)[0], caUna = masCercanas(caDist, 1)[0];
-            const totAv = Object.keys(avDist).length, totCa = Object.keys(caDist).length;
-
-            let txt = "";
-            if (totAv >= 2 && totCa >= 1)      txt = `AVENIDA ${avenidas[0]} Y ${avenidas[1]} CALLE ${caUna}`;
-            else if (totCa >= 2 && totAv >= 1) txt = `AVENIDA ${avUna} CALLE ${calles[0]} Y ${calles[1]}`;
-            else if (totAv >= 1 && totCa >= 1) txt = `AVENIDA ${avUna} CALLE ${caUna}`;
-            else if (totAv >= 1)               txt = `AVENIDA ${avUna}`;
-            else if (totCa >= 1)               txt = `CALLE ${caUna}`;
+            const txt = componerTexto(avDist, caDist);
 
             if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; }
             else reintentar();
@@ -354,112 +354,52 @@ function buscarOverpass(lat, lon, tk) {
     }).catch(() => reintentar());
 }
 
-/* ===================== PHOTON (base) ===================== */
-// Número de la calle (o avenida) más cercana: Photon ordena por cercanía y se toma el primer
-// resultado cuyo nombre sea "CALLE n" / "AVENIDA n". Radios en km (por defecto 100 m y 250 m).
-async function photon(lat, lon, palabra, radios) {
-    const re = new RegExp(palabra + "\\s*(\\d+)", "i");
-    for (const radio of (radios || [0.1, 0.25])) {
-        const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radio}&limit=20&osm_tag=highway`;
-        const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const d = await r.json();
-        for (const f of (d.features || [])) {
-            const p = f.properties || {};
-            for (const nombre of [p.name, p.street]) {
-                const mt = nombre && String(nombre).match(re);
-                if (mt) return Number(mt[1]);
-            }
-        }
-    }
-    return null;
+/* ===================== PHOTON: avenida y calle más cercanas =====================
+   Igual que Overpass pero con Photon: busca a 70 m y, si falta la avenida o la calle,
+   amplía a 140 m solo para completar la que no apareció. Las distancias salen de las
+   coordenadas que devuelve Photon para cada vía. */
+async function photonElementos(lat, lon, radioKm) {
+    const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radioKm}&limit=50&osm_tag=highway`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
+    return (d.features || []).map(f => {
+        const p = f.properties || {};
+        const c = (f.geometry && f.geometry.coordinates) || [];
+        const dist = c.length >= 2 ? Math.hypot((c[0] - lon) * kLon, (c[1] - lat) * kLat) : 1e9;
+        // vías: su nombre; otros objetos: la calle de su dirección
+        const nombre = p.osm_key === "highway" ? p.name : p.street;
+        return { nombre: nombre || "", d: dist };
+    });
 }
 
-// La calle o avenida más cercana al punto, sea cual sea: { tipo: "calle" | "avenida", num }
-async function photonPrimero(lat, lon) {
-    for (const radio of [0.1, 0.25]) {
-        const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radio}&limit=20&osm_tag=highway`;
-        const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const d = await r.json();
-        for (const f of (d.features || [])) {
-            const p = f.properties || {};
-            for (const nombre of [p.name, p.street]) {
-                const mt = nombre && String(nombre).match(/(calle|avenida)\s*(\d+)/i);
-                if (mt) return { tipo: mt[1].toLowerCase(), num: Number(mt[2]) };
-            }
-        }
-    }
-    return null;
-}
-
-const unicosOrdenados = (lista) => Array.from(new Set(lista.filter(n => n !== null))).sort((a, b) => a - b);
-
-/* ===================== PHOTON 1: primero la calle, después la avenida ===================== */
 async function buscarPhoton(lat, lon, tk) {
     const m = metodos.photon;
     const vigente = () => tk === m.token;
     while (vigente()) {
         try {
-            mostrar(m, "BUSCANDO CALLE…");
-            const calle = await photon(lat, lon, "calle");
+            const avDist = {}, caDist = {};
+            // soloFaltantes: en la búsqueda ampliada solo se completa el tipo (avenida o calle) que no apareció
+            const procesar = (elementos, soloFaltantes) => {
+                const faltaAv = !Object.keys(avDist).length, faltaCa = !Object.keys(caDist).length;
+                elementos.forEach(e => {
+                    const av = e.nombre.match(/avenida\s*(\d+)/i);
+                    if (av && (!soloFaltantes || faltaAv) && !(av[1] in avDist && avDist[av[1]] <= e.d)) avDist[av[1]] = e.d;
+                    const ca = e.nombre.match(/calle\s*(\d+)/i);
+                    if (ca && (!soloFaltantes || faltaCa) && !(ca[1] in caDist && caDist[ca[1]] <= e.d)) caDist[ca[1]] = e.d;
+                });
+            };
+
+            procesar(await photonElementos(lat, lon, 0.07), false);
             if (!vigente()) return;
-
-            mostrar(m, calle ? "CALLE " + calle + " · BUSCANDO AVENIDA…" : "BUSCANDO AVENIDA…");
-            const avenida = await photon(lat, lon, "avenida");
-            if (!vigente()) return;
-
-            const txt = [avenida !== null && "AVENIDA " + avenida, calle !== null && "CALLE " + calle].filter(Boolean).join(" ");
-            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; return; }
-        } catch (e) { /* se reintenta abajo */ }
-
-        if (!vigente()) return;
-        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
-        await esperar(500);
-    }
-}
-
-/* ===================== PHOTON 2: avenidas o calles de ambos lados =====================
-   1) Busca la vía más cercana al punto.
-   2) Si es una CALLE (va de norte a sur): se queda con esa calle y busca la avenida que queda
-      al norte y la que queda al sur (sondeos a 60 m). Muestra las avenidas de menor a mayor.
-   3) Si es una AVENIDA (va de este a oeste): se queda con esa avenida y busca la calle del este
-      y la del oeste. Muestra las calles de menor a mayor. */
-async function buscarPhotonLados(lat, lon, tk) {
-    const m = metodos.photon2;
-    const vigente = () => tk === m.token;
-    const SONDEO = 60;   // metros hacia cada lado
-    const dLat = SONDEO / 111320, dLon = SONDEO / (111320 * Math.cos(lat * Math.PI / 180));
-    while (vigente()) {
-        try {
-            mostrar(m, "BUSCANDO CALLE O AVENIDA…");
-            const via = await photonPrimero(lat, lon);
-            if (!vigente()) return;
-
-            if (via) {
-                let txt = "";
-                if (via.tipo === "calle") {
-                    mostrar(m, "CALLE " + via.num + " · BUSCANDO AVENIDAS…");
-                    const lados = await Promise.all([
-                        photon(lat + dLat, lon, "avenida", [0.1]),
-                        photon(lat - dLat, lon, "avenida", [0.1])
-                    ]);
-                    const avs = unicosOrdenados(lados);
-                    txt = (avs.length ? "AVENIDA " + avs.join(" Y ") + " " : "") + "CALLE " + via.num;
-                } else {
-                    mostrar(m, "AVENIDA " + via.num + " · BUSCANDO CALLES…");
-                    const lados = await Promise.all([
-                        photon(lat, lon + dLon, "calle", [0.1]),
-                        photon(lat, lon - dLon, "calle", [0.1])
-                    ]);
-                    const cas = unicosOrdenados(lados);
-                    txt = "AVENIDA " + via.num + (cas.length ? " CALLE " + cas.join(" Y ") : "");
-                }
+            if (!Object.keys(avDist).length || !Object.keys(caDist).length) {
+                procesar(await photonElementos(lat, lon, 0.14), true);
                 if (!vigente()) return;
-                mostrar(m, txt, "ok");
-                m.btn.disabled = false;
-                return;
             }
+
+            const txt = componerTexto(avDist, caDist);
+            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; return; }
         } catch (e) { /* se reintenta abajo */ }
 
         if (!vigente()) return;
@@ -496,7 +436,6 @@ function buscar(nombre, ejecutar) {
 
 metodos.overpass.btn.addEventListener("click", () => buscar("overpass", buscarOverpass));
 metodos.photon.btn.addEventListener("click",   () => buscar("photon", buscarPhoton));
-metodos.photon2.btn.addEventListener("click",  () => buscar("photon2", buscarPhotonLados));
 </script>
 </body>
 </html>
