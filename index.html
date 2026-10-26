@@ -16,6 +16,7 @@
     --texto: #1f2937;
     --texto-sec: #6b7280;
     --error: #e53935;
+    --on-accent: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -34,13 +35,14 @@ body {
     border-bottom: 1px solid var(--outline);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
 }
-#btnBuscar {
+.metodo { display: flex; flex-direction: column; gap: 8px; }
+.btn-buscar {
     border: 0;
     border-radius: 10px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font: inherit;
     font-size: 15px;
     font-weight: 700;
@@ -49,10 +51,10 @@ body {
     cursor: pointer;
     touch-action: manipulation;
 }
-#btnBuscar:active { background: var(--accent-dark); }
-#btnBuscar:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
-#btnBuscar[disabled] { opacity: .7; }
-#resultado {
+.btn-buscar:active { background: var(--accent-dark); }
+.btn-buscar:focus-visible, #btnMapa:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.btn-buscar[disabled] { opacity: .7; }
+.resultado {
     min-height: 44px;
     display: flex;
     align-items: center;
@@ -66,9 +68,23 @@ body {
     background: var(--surface-alt);
     color: var(--texto-sec);
 }
-#resultado.ok { background: var(--accent-soft); color: var(--accent-dark); }
-#resultado.error { color: var(--error); }
-#mapaCaja { flex: 1; position: relative; min-height: 0; background: #e5e7eb; }
+.resultado.ok { background: var(--accent-soft); color: var(--accent-dark); }
+.resultado.error { color: var(--error); }
+
+#btnMapa {
+    border: 1px solid var(--outline);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--accent-dark);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 12px;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+#mapaCaja { flex: 1; position: relative; min-height: 0; background: #e5e7eb; display: none; }
+#mapaCaja.abierto { display: block; }
 #mapa { position: absolute; inset: 0; }
 #precision {
     position: absolute;
@@ -104,9 +120,9 @@ body {
         --outline: #2a2f3a;
         --texto: #e5e7eb;
         --texto-sec: #9ca3af;
+        --on-accent: #0f1115;
     }
-    #btnBuscar { color: #0f1115; }
-    #btnBuscar:active { background: #8fb6ff; }
+    .btn-buscar:active { background: #8fb6ff; }
     #precision { background: rgba(24,27,34,.92); }
     #mapaCaja { background: #1f232c; }
 }
@@ -115,8 +131,15 @@ body {
 <body>
 
 <div class="panel">
-    <button id="btnBuscar" type="button">📍 BUSCAR LUGAR</button>
-    <div id="resultado" role="status" aria-live="polite">SIN LUGAR</div>
+    <div class="metodo">
+        <button id="btnOverpass" class="btn-buscar" type="button">📍 BUSCAR LUGAR (OVERPASS)</button>
+        <div id="resOverpass" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
+    </div>
+    <div class="metodo">
+        <button id="btnPhoton" class="btn-buscar" type="button">📍 BUSCAR LUGAR (PHOTON)</button>
+        <div id="resPhoton" class="resultado" role="status" aria-live="polite">SIN LUGAR</div>
+    </div>
+    <button id="btnMapa" type="button" aria-expanded="false">▼ DESPLEGAR MAPA</button>
 </div>
 
 <div id="mapaCaja">
@@ -127,13 +150,62 @@ body {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-/* ===== Servidores Overpass: se consultan los tres a la vez y gana el primero que responda ===== */
+/* ===== Mapa plegable ===== */
+const caja = document.getElementById("mapaCaja");
+const btnMapa = document.getElementById("btnMapa");
+const vacio = document.getElementById("vacio");
+const precisionEl = document.getElementById("precision");
+
+let mapa = null, capa = null;
+let punto = null;   // último punto GPS { lat, lon, prec }
+
+function dibujarMapa() {
+    if (!punto || !window.L || !caja.classList.contains("abierto")) return;
+    vacio.style.display = "none";
+    if (!mapa) {
+        mapa = L.map("mapa", { zoomControl: false, attributionControl: true });
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OSM" }).addTo(mapa);
+    }
+    if (capa) capa.remove();
+    capa = L.layerGroup().addTo(mapa);
+    if (punto.prec && punto.prec > 5) {
+        L.circle([punto.lat, punto.lon], { radius: Math.min(punto.prec, 200), color: "#1b6ef3", weight: 1, fillOpacity: 0.12 }).addTo(capa);
+    }
+    L.circleMarker([punto.lat, punto.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#e53935", fillOpacity: 1 }).addTo(capa);
+    mapa.setView([punto.lat, punto.lon], 17);
+    setTimeout(() => { mapa.invalidateSize(); mapa.setView([punto.lat, punto.lon], 17); }, 120);
+    precisionEl.textContent = punto.prec ? "PRECISIÓN ±" + Math.round(punto.prec) + " M" : "";
+    precisionEl.style.display = punto.prec ? "block" : "none";
+}
+
+btnMapa.addEventListener("click", () => {
+    const abrir = !caja.classList.contains("abierto");
+    caja.classList.toggle("abierto", abrir);
+    btnMapa.setAttribute("aria-expanded", abrir ? "true" : "false");
+    btnMapa.textContent = abrir ? "▲ REPLEGAR MAPA" : "▼ DESPLEGAR MAPA";
+    if (abrir) { vacio.style.display = punto ? "none" : "flex"; dibujarMapa(); }
+});
+
+function guardarPunto(lat, lon, prec) {
+    punto = { lat, lon, prec };
+    dibujarMapa();   // si el mapa está replegado se dibuja al desplegarlo
+}
+
+/* ===== Estado de cada método ===== */
+const metodos = {
+    overpass: { btn: document.getElementById("btnOverpass"), res: document.getElementById("resOverpass"), token: 0, fin: 0 },
+    photon:   { btn: document.getElementById("btnPhoton"),   res: document.getElementById("resPhoton"),   token: 0, fin: 0 }
+};
+function mostrar(m, txt, clase) { m.res.textContent = txt; m.res.className = "resultado" + (clase ? " " + clase : ""); }
+function fallar(m, msg) { mostrar(m, msg, "error"); m.btn.disabled = false; }
+
+/* ===================== OVERPASS ===================== */
 const SERVIDORES = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter"
 ];
-
+// Consulta los tres servidores a la vez y usa el que responda primero
 function consultarOverpass(consulta) {
     const ctrls = [];
     const pedir = (url) => {
@@ -147,50 +219,16 @@ function consultarOverpass(consulta) {
     return Promise.any(SERVIDORES.map(pedir)).then(d => { ctrls.forEach(c => c.abort()); return d; });
 }
 
-/* ===== Elementos ===== */
-const btn = document.getElementById("btnBuscar");
-const resultado = document.getElementById("resultado");
-const precisionEl = document.getElementById("precision");
-const vacio = document.getElementById("vacio");
-
-let mapa = null, capa = null;
-let token = 0, finBusqueda = 0;
-
-function mostrarTexto(txt, clase) {
-    resultado.textContent = txt;
-    resultado.className = clase || "";
-}
-
-/* ===== Mapa ===== */
-function mostrarMapa(lat, lon, prec) {
-    vacio.style.display = "none";
-    if (!mapa) {
-        mapa = L.map("mapa", { zoomControl: false, attributionControl: true });
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OSM" }).addTo(mapa);
-    }
-    if (capa) capa.remove();
-    capa = L.layerGroup().addTo(mapa);
-    if (prec && prec > 5) {
-        L.circle([lat, lon], { radius: Math.min(prec, 200), color: "#1b6ef3", weight: 1, fillOpacity: 0.12 }).addTo(capa);
-    }
-    L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#e53935", fillOpacity: 1 }).addTo(capa);
-    mapa.setView([lat, lon], 17);
-    setTimeout(() => { mapa.invalidateSize(); mapa.setView([lat, lon], 17); }, 120);
-    precisionEl.textContent = prec ? "PRECISIÓN ±" + Math.round(prec) + " M" : "";
-    precisionEl.style.display = prec ? "block" : "none";
-}
-
-/* ===== Calcula avenida y calle más cercanas al punto GPS ===== */
-function buscarLugar(lat, lon, intento, tk) {
-    const vigente = () => tk === token;
+function buscarOverpass(lat, lon, tk) {
+    const m = metodos.overpass;
+    const vigente = () => tk === m.token;
     const reintentar = () => {
         if (!vigente()) return;
-        if (Date.now() > finBusqueda) { fallar("NO SE LOGRA UBICAR"); return; }
-        setTimeout(() => buscarLugar(lat, lon, intento + 1, tk), 500);
+        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
+        setTimeout(() => buscarOverpass(lat, lon, tk), 500);
     };
 
-    const consulta = `[out:json][timeout:8];(way(around:90,${lat},${lon})["highway"]["name"];);out geom;`;
-    consultarOverpass(consulta).then(data => {
+    consultarOverpass(`[out:json][timeout:8];(way(around:90,${lat},${lon})["highway"]["name"];);out geom;`).then(data => {
         const avDist = {}, caDist = {};
         // Distancia (m) del punto GPS a cada tramo de calle (plano local lat/lon -> metros)
         const kLat = 111320, kLon = 111320 * Math.cos(lat * Math.PI / 180);
@@ -205,9 +243,9 @@ function buscarLugar(lat, lon, intento, tk) {
                             .map(g => ({ x: (g.lon - lon) * kLon, y: (g.lat - lat) * kLat }));
             if (!pts.length) return 1e9;
             if (pts.length === 1) return Math.hypot(pts[0].x, pts[0].y);
-            let m = 1e9;
-            for (let i = 0; i < pts.length - 1; i++) m = Math.min(m, distSegmento(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y));
-            return m;
+            let min = 1e9;
+            for (let i = 0; i < pts.length - 1; i++) min = Math.min(min, distSegmento(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y));
+            return min;
         };
         // soloFaltantes: en la búsqueda ampliada solo se completa el tipo (avenida o calle) que no apareció
         const procesar = (elementos, soloFaltantes) => {
@@ -226,7 +264,6 @@ function buscarLugar(lat, lon, intento, tk) {
 
         const terminar = () => {
             if (!vigente()) return;
-            // Las más cercanas primero; al mostrar se ordenan de menor a mayor
             const masCercanas = (obj, n) => Object.keys(obj).sort((a, b) => obj[a] - obj[b]).slice(0, n).sort((a, b) => a - b);
             const avenidas = masCercanas(avDist, 2), calles = masCercanas(caDist, 2);
             const avUna = masCercanas(avDist, 1)[0], caUna = masCercanas(caDist, 1)[0];
@@ -239,12 +276,8 @@ function buscarLugar(lat, lon, intento, tk) {
             else if (totAv >= 1)               txt = `AVENIDA ${avUna}`;
             else if (totCa >= 1)               txt = `CALLE ${caUna}`;
 
-            if (txt) {
-                mostrarTexto(txt, "ok");
-                btn.disabled = false;
-            } else {
-                reintentar();
-            }
+            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; }
+            else reintentar();
         };
 
         // Siempre avenida Y calle: si en 90 m falta alguna, se amplía a 150 m solo para completarla
@@ -259,36 +292,77 @@ function buscarLugar(lat, lon, intento, tk) {
     }).catch(() => reintentar());
 }
 
-function fallar(msg) {
-    mostrarTexto(msg, "error");
-    btn.disabled = false;
+/* ===================== PHOTON ===================== */
+// Busca el número de la calle (o avenida) más cercana: Photon ordena por cercanía y se toma
+// el primer resultado cuyo nombre sea "CALLE n" / "AVENIDA n". Radio en km: 100 m y luego 250 m.
+async function photon(lat, lon, palabra) {
+    const re = new RegExp(palabra + "\\s*(\\d+)", "i");
+    for (const radio of [0.1, 0.25]) {
+        const url = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&radius=${radio}&limit=20&osm_tag=highway`;
+        const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        for (const f of (d.features || [])) {
+            const p = f.properties || {};
+            for (const nombre of [p.name, p.street]) {
+                const mt = nombre && String(nombre).match(re);
+                if (mt) return mt[1];
+            }
+        }
+    }
+    return null;
 }
 
-/* ===== Botón BUSCAR LUGAR ===== */
-btn.addEventListener("click", () => {
-    if (!navigator.geolocation) { fallar("GPS NO DISPONIBLE"); return; }
+// Primero la calle, después la avenida
+async function buscarPhoton(lat, lon, tk) {
+    const m = metodos.photon;
+    const vigente = () => tk === m.token;
+    while (vigente()) {
+        try {
+            mostrar(m, "BUSCANDO CALLE…");
+            const calle = await photon(lat, lon, "calle");
+            if (!vigente()) return;
 
-    const tk = ++token;
-    finBusqueda = Date.now() + 12000;   // tope: si en 12 s no hay lugar, se detiene
-    btn.disabled = true;
-    mostrarTexto("BUSCANDO LUGAR…", "");
+            mostrar(m, calle ? "CALLE " + calle + " · BUSCANDO AVENIDA…" : "BUSCANDO AVENIDA…");
+            const avenida = await photon(lat, lon, "avenida");
+            if (!vigente()) return;
 
-    const vigente = () => tk === token;
+            const txt = [avenida && "AVENIDA " + avenida, calle && "CALLE " + calle].filter(Boolean).join(" ");
+            if (txt) { mostrar(m, txt, "ok"); m.btn.disabled = false; return; }
+        } catch (e) { /* se reintenta abajo */ }
+
+        if (!vigente()) return;
+        if (Date.now() > m.fin) { fallar(m, "NO SE LOGRA UBICAR"); return; }
+        await new Promise(ok => setTimeout(ok, 500));
+    }
+}
+
+/* ===================== GPS + BOTONES ===================== */
+function buscar(nombre, ejecutar) {
+    const m = metodos[nombre];
+    if (!navigator.geolocation) { fallar(m, "GPS NO DISPONIBLE"); return; }
+
+    const tk = ++m.token;
+    m.fin = Date.now() + 12000;   // tope: si en 12 s no hay lugar, se detiene
+    m.btn.disabled = true;
+    mostrar(m, "BUSCANDO LUGAR…");
+
+    const vigente = () => tk === m.token;
     const pedir = () => navigator.geolocation.getCurrentPosition(pos => {
         if (!vigente()) return;
         const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-        mostrarMapa(lat, lon, accuracy);
-        buscarLugar(lat, lon, 0, tk);
+        guardarPunto(lat, lon, accuracy);
+        ejecutar(lat, lon, tk);
     }, err => {
         if (!vigente()) return;
-        if ((err && err.code === 1) || Date.now() > finBusqueda) {
-            fallar("NO SE LOGRA UBICAR");   // permiso denegado o se acabó el tiempo
-        } else {
-            setTimeout(() => { if (vigente()) pedir(); }, 1500);
-        }
+        if ((err && err.code === 1) || Date.now() > m.fin) fallar(m, "NO SE LOGRA UBICAR");
+        else setTimeout(() => { if (vigente()) pedir(); }, 1500);
     }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 });
     pedir();
-});
+}
+
+metodos.overpass.btn.addEventListener("click", () => buscar("overpass", buscarOverpass));
+metodos.photon.btn.addEventListener("click",   () => buscar("photon", buscarPhoton));
 </script>
 </body>
 </html>
